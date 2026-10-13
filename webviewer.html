@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShpTo3DTiles Workbench</title>
+  <link rel="stylesheet" href="/cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="/webviewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">S3</div>
+    <div>
+      <div class="eyebrow">SPATIAL BUILD PIPELINE</div>
+      <h1>ShpTo3DTiles Workbench</h1>
+    </div>
+    <div class="top-status"><span class="status-dot" id="serverDot"></span><span id="serverStatus">检测运行环境</span></div>
+  </header>
+
+  <main class="workspace">
+    <aside class="control-panel">
+      <section class="section-block">
+        <div class="section-heading"><span>01</span><h2>转换任务</h2></div>
+        <label>输入 SHP</label>
+        <input id="shpPath" type="text" placeholder="C:\\data\\buildings.shp">
+        <label>可选 PRJ</label>
+        <input id="prjPath" type="text" placeholder="与 SHP 同名时可留空">
+        <label>输出目录</label>
+        <input id="outPath" type="text" placeholder="C:\\data\\tiles">
+        <details class="parameter-group" open>
+          <summary>LOD 与瓦片参数</summary>
+          <div class="parameter-grid">
+            <div><label>LOD</label><select id="lod"><option value="L1_SIMPLE">L1 简化</option><option value="L2_STANDARD" selected>L2 标准</option><option value="L3_DETAIL">L3 细节</option><option value="NONE">原始</option></select></div>
+            <div><label>批量内容数</label><input id="tileMaxContents" type="number" min="1" value="32"></div>
+            <div><label>并行度</label><input id="parallelism" type="number" min="1" max="32" value="4"></div>
+            <div><label>最大树深</label><input id="tileMaxDepth" type="number" min="1" value="12"></div>
+            <div><label>外置层级深度</label><input id="tileExternalDepth" type="number" min="1" value="2"></div>
+            <div><label>进度间隔（秒）</label><input id="progressInterval" type="number" min="1" value="5"></div>
+            <label class="check-row parameter-wide"><input id="lodChain" type="checkbox"><span>批次级 L1 / L2 / L3</span></label>
+          </div>
+        </details>
+        <label class="check-row"><input id="textures" type="checkbox"><span>生成外立面纹理</span></label>
+        <div><label for="textureAtlasWidth">LOD 纹理清晰度</label><select id="textureAtlasWidth"><option value="384" selected>流畅（384 × 256，推荐）</option><option value="768">均衡（768 × 512）</option><option value="1536">高清（1536 × 1024，缓存压力较大）</option></select></div>
+        <label class="check-row"><input id="resume" type="checkbox"><span>复用已完成批次</span></label>
+        <label class="check-row"><input id="keepIntermediate" type="checkbox"><span>保留 OBJ / GLB 中间文件</span></label>
+        <label class="check-row muted"><input id="legacy" type="checkbox"><span>旧版逐栋管线（对照）</span></label>
+
+        <details class="parameter-group" open>
+          <summary>女儿墙参数</summary>
+          <div class="parameter-grid">
+            <div><label>起始层数 lc ≥</label><input id="parapetMinLc" type="number" min="0" step="1" value="5"></div>
+            <div><label>最小高度（m）</label><input id="parapetMinHeight" type="number" min="0" step="0.05" value="0.80"></div>
+            <div><label>最大高度（m）</label><input id="parapetMaxHeight" type="number" min="0" step="0.05" value="1.40"></div>
+            <div><label>每层增量（m）</label><input id="parapetPerFloor" type="number" min="0" step="0.01" value="0.04"></div>
+            <div><label>墙体厚度（m）</label><input id="parapetThickness" type="number" min="0.01" step="0.05" value="0.40"></div>
+          </div>
+        </details>
+
+        <details class="parameter-group">
+          <summary>屋顶机房参数</summary>
+          <div class="parameter-grid">
+            <div><label>起始层数 lc ≥</label><input id="shaftMinLc" type="number" min="0" step="1" value="9"></div>
+            <div><label>屋面内缩（m）</label><input id="shaftInset" type="number" min="0.01" step="0.1" value="1.50"></div>
+            <div><label>距边界净距（m）</label><input id="shaftClearance" type="number" min="0" step="0.1" value="2.00"></div>
+            <div><label>最大长边（m）</label><input id="shaftMaxLen" type="number" min="0.01" step="0.1" value="8.00"></div>
+            <div><label>最大短边（m）</label><input id="shaftMaxWid" type="number" min="0.01" step="0.1" value="6.00"></div>
+            <div><label>最大高度（m）</label><input id="shaftMaxHeight" type="number" min="0.01" step="0.1" value="6.00"></div>
+            <div class="parameter-wide"><label>中心采样比例</label><input id="shaftCenterRatio" type="number" min="0.01" max="1" step="0.05" value="0.80"></div>
+          </div>
+        </details>
+        <button class="primary-action" id="convertButton">开始优化转换</button>
+      </section>
+
+      <section class="section-block" hidden aria-hidden="true">
+        <div class="section-heading"><span>02</span><h2>超大范围压测数据</h2></div>
+        <label>建筑分布</label>
+        <select id="stressPattern"><option value="clustered">分散城市簇（大范围）</option><option value="continuous">连续城区（多边形轮廓）</option></select>
+        <div class="field-grid">
+          <div><label>建筑数量</label><input id="stressCount" type="number" min="1" max="250000" value="25000"></div>
+          <div><label>随机种子</label><input id="stressSeed" type="number" value="20260929"></div>
+        </div>
+        <div class="field-grid">
+          <div><label>东西范围 km</label><input id="stressWidth" type="number" min="1" value="1000"></div>
+          <div><label>南北范围 km</label><input id="stressHeight" type="number" min="1" value="750"></div>
+        </div>
+        <label>数据目录</label>
+        <input id="stressOut" type="text" value="C:\\Users\\zzzzzys\\Desktop\\release-1.1.0\\release-1.1.0\\stress-data">
+        <button class="secondary-action stress-action" id="stressButton">生成 75 万 km² SHP</button>
+        <div id="stressState" class="job-state">未生成压测数据</div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading"><span>02</span><h2>加载结果</h2></div>
+        <label>输出目录或 tileset.json</label>
+        <input id="resultPath" type="text" placeholder="C:\\data\\tiles">
+        <div class="action-row"><button class="secondary-action" id="inspectButton">检查产物</button><button class="secondary-action" id="loadButton">在地图中打开</button></div>
+        <button class="secondary-action" id="freezeLodButton">冻结当前 LOD（排查闪烁）</button>
+        <div id="lodDiagnostic" class="job-state">加载后显示 LOD 诊断</div>
+        <label>屏幕空间误差</label>
+        <input id="sse" type="range" min="4" max="32" value="12"><div class="range-value"><span>精细</span><strong id="sseValue">12</strong><span>流畅</span></div>
+      </section>
+
+      <section class="section-block log-block">
+        <div class="section-heading"><span>03</span><h2>任务日志</h2></div>
+        <div id="jobState" class="job-state">等待任务</div>
+        <pre id="logOutput">在这里查看转换和加载状态。</pre>
+      </section>
+    </aside>
+
+    <section class="viewport-panel">
+      <div id="cesiumContainer"></div>
+      <div class="viewport-header"><span class="live-label"><span class="live-dot"></span>LIVE PREVIEW</span><span id="tilesetLabel">未加载 tileset</span></div>
+      <div class="metrics-strip">
+        <div><span>瓦片文件</span><strong id="metricB3dm">--</strong></div>
+        <div><span>内容节点</span><strong id="metricContent">--</strong></div>
+        <div><span>LOD 节点</span><strong id="metricLod">--</strong></div>
+        <div><span>总大小</span><strong id="metricBytes">--</strong></div>
+        <div><span>GPU 专用显存</span><strong id="metricGpu">--</strong></div>
+        <div><span>JS 堆</span><strong id="metricJs">--</strong></div>
+        <div><span>已加载 / 处理</span><strong id="metricTiles">--</strong></div>
+        <div><span>几何缓存</span><strong id="metricGeometry">--</strong></div>
+        <div><span>纹理缓存</span><strong id="metricTextures">--</strong></div>
+        <div><span>FPS</span><strong id="metricFps">--</strong></div>
+        <div><span>转换耗时</span><strong id="metricElapsed">--</strong></div>
+      </div>
+      <div class="empty-state" id="emptyState"><span class="empty-index">READY</span><h2>等待一个 3D Tiles 结果</h2><p>先运行优化转换，再加载输出目录。地图会显示批量瓦片、LOD 切换和运行时状态。</p></div>
+    </section>
+  </main>
+
+  <script>window.CESIUM_BASE_URL = "/cesium/";</script>
+  <script src="/cesium/Cesium.js"></script>
+  <script src="/webviewer.js"></script>
+</body>
+</html>

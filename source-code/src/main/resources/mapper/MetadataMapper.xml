@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pipeline.api.mapper.MetadataMapper">
+
+    <select id="listRoadNames" resultType="string">
+        SELECT DISTINCT name
+        FROM road_centerline
+        WHERE name IS NOT NULL AND name &lt;&gt; ''
+        ORDER BY name
+    </select>
+
+    <select id="listBldUsages" resultType="string">
+        SELECT DISTINCT bld_usage
+        FROM building_footprint
+        WHERE bld_usage IS NOT NULL AND bld_usage &lt;&gt; ''
+        ORDER BY bld_usage
+    </select>
+
+    <select id="floorsRange" resultType="map">
+        SELECT MIN(lc) AS "min", MAX(lc) AS "max"
+        FROM building_footprint
+        WHERE lc IS NOT NULL
+    </select>
+
+    <select id="transformToWgs84" resultType="map">
+        SELECT ST_X(p) AS "lon", ST_Y(p) AS "lat"
+        FROM ST_Transform(ST_SetSRID(ST_MakePoint(#{x}, #{y}), 4544), 4326) AS p
+    </select>
+
+    <select id="centroidByWkt" resultType="map">
+        SELECT ST_X(c) AS "x", ST_Y(c) AS "y"
+        FROM ST_Centroid(ST_GeomFromText(#{wkt}, 4544)) AS c
+    </select>
+
+    <select id="centroidByGeoJson" resultType="map">
+        SELECT ST_X(c) AS "x", ST_Y(c) AS "y"
+        FROM ST_Centroid(
+            ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(#{json}), 4326), 4544)
+        ) AS c
+    </select>
+
+</mapper>

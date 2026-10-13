@@ -1,0 +1,25 @@
+# Generated tiles, datasets, offline distributions and local runtimes
+/offline-package-build/
+/ShpTo3DTiles/
+/*.zip
+/optimized-output*/
+/stress-data*/
+/stress-output*/
+/texture-output*/
+/texture-fix-output*/
+/logs/
+# Build products and caches
+**/target/
+**/.build-check/
+**/__pycache__/
+*.pyc
+*.class
+/ShpTo3DTiles-source/.legacy-smoke/
+/ShpTo3DTiles-source/.optimized-single/
+/ShpTo3DTiles-source/.optimized-smoke/
+.env
+.env.*
+
+# Original local datasets
+/建筑底面/
+/建筑纹理/

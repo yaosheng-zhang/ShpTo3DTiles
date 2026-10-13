@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pipeline.api.mapper.SceneQueryMapper">
+
+    <resultMap id="FootprintMap" type="com.pipeline.api.dto.BuildingFootprintDTO">
+        <result column="bid"       property="bid"/>
+        <result column="jzgd"      property="jzgd"/>
+        <result column="base_z"    property="baseZ"/>
+        <result column="bld_usage" property="bldUsage"/>
+        <result column="floors"    property="floors"/>
+        <result column="wkt"       property="wkt"/>
+    </resultMap>
+
+    <resultMap id="ObjModelMap" type="com.pipeline.api.dto.ObjModelDTO">
+        <result column="filename" property="filename"/>
+        <result column="rel_path" property="relPath"/>
+    </resultMap>
+
+    <!--
+        Reusable SQL fragments.
+        Note: the on-disk column is named `lc` (legacy "LC" attribute from the
+        source shapefile). DTOs expose it as `floors` via the SELECT alias and
+        for filter consistency the clause itself references the real column.
+    -->
+    <sql id="buildingFilterClause">
+        <if test="usages != null and usages.size() > 0">
+            AND bld_usage IN
+            <foreach collection="usages" item="u" open="(" separator="," close=")">
+                #{u}
+            </foreach>
+        </if>
+        <if test="minFloors != null">
+            AND lc &gt;= #{minFloors}
+        </if>
+        <if test="maxFloors != null">
+            AND lc &lt;= #{maxFloors}
+        </if>
+    </sql>
+
+    <sql id="roadNameClause">
+        <if test="names != null and names.size() > 0">
+            AND (
+            <foreach collection="names" item="n" separator=" OR ">
+                r.name ILIKE '%' || #{n} || '%'
+                OR (r.src_meta IS NOT NULL AND r.src_meta::text ILIKE '%' || #{n} || '%')
+            </foreach>
+            )
+        </if>
+    </sql>
+
+    <!--
+        Spatial predicate fragment.
+        `predicate` parameter selects which PostGIS function to call:
+          "within"   → ST_Within     (feature fully contained in polygon)
+          otherwise  → ST_Intersects (feature overlaps polygon — default)
+        The argument order matches both functions:
+          ST_Intersects(feature, polygon)
+          ST_Within    (feature, polygon)   ← "is feature inside polygon"
+    -->
+    <sql id="spatialPredicate">
+        <choose>
+            <when test="predicate == 'within'">ST_Within</when>
+            <otherwise>ST_Intersects</otherwise>
+        </choose>
+    </sql>
+
+    <!--
+        Buildings: range (WKT, EPSG:4544) + filter.
+    -->
+    <select id="findBuildingsByWktAndFilter" resultMap="FootprintMap">
+        SELECT bid, jzgd, base_z, bld_usage, lc AS floors,
+               ST_AsText(footprint) AS wkt
+        FROM building_footprint
+        WHERE <include refid="spatialPredicate"/>(
+            footprint,
+            ST_GeomFromText(#{wkt}, 4544)
+        )
+        <include refid="buildingFilterClause"/>
+        ORDER BY bid
+    </select>
+
+    <!--
+        Buildings: range (GeoJSON WGS84, transformed to 4544) + filter.
+    -->
+    <select id="findBuildingsByGeoJsonAndFilter" resultMap="FootprintMap">
+        SELECT bid, jzgd, base_z, bld_usage, lc AS floors,
+               ST_AsText(footprint) AS wkt
+        FROM building_footprint
+        WHERE <include refid="spatialPredicate"/>(
+            footprint,
+            ST_Transform(
+                ST_SetSRID(ST_GeomFromGeoJSON(#{json}), 4326),
+                4544
+            )
+        )
+        <include refid="buildingFilterClause"/>
+        ORDER BY bid
+    </select>
+
+    <!--
+        Roads: range (WKT, EPSG:4544) + optional road-name filter.
+        Same JOIN topology as ObjQueryMapper.findObjsByRoadName, so the same
+        DISTINCT semantics apply (one obj_body row → many road legs).
+    -->
+    <select id="findRoadObjsByWktAndFilter" resultMap="ObjModelMap">
+        SELECT DISTINCT b.filename, b.rel_path
+        FROM obj_body b
+                 JOIN obj_road_leg l ON l.obj_id = b.obj_id
+                 JOIN road_centerline r ON r.gid = l.road_gid
+        WHERE <include refid="spatialPredicate"/>(
+            b.hull_geom,
+            ST_GeomFromText(#{wkt}, 4544)
+        )
+        <include refid="roadNameClause"/>
+        ORDER BY b.filename
+    </select>
+
+    <!--
+        Roads: range (GeoJSON WGS84) + optional road-name filter.
+    -->
+    <select id="findRoadObjsByGeoJsonAndFilter" resultMap="ObjModelMap">
+        SELECT DISTINCT b.filename, b.rel_path
+        FROM obj_body b
+                 JOIN obj_road_leg l ON l.obj_id = b.obj_id
+                 JOIN road_centerline r ON r.gid = l.road_gid
+        WHERE <include refid="spatialPredicate"/>(
+            b.hull_geom,
+            ST_Transform(
+                ST_SetSRID(ST_GeomFromGeoJSON(#{json}), 4326),
+                4544
+            )
+        )
+        <include refid="roadNameClause"/>
+        ORDER BY b.filename
+    </select>
+
+</mapper>

@@ -1,0 +1,76 @@
+:root {
+  color-scheme: dark;
+  --bg: #111518;
+  --panel: #171d21;
+  --panel-2: #1c2428;
+  --line: #2b353a;
+  --text: #e8efed;
+  --muted: #8e9a9d;
+  --accent: #53c7b3;
+  --accent-strong: #8ae2d0;
+  --danger: #e27b73;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+body { overflow: hidden; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.topbar { height: 68px; display: flex; align-items: center; gap: 14px; padding: 0 22px; border-bottom: 1px solid var(--line); background: #13191c; }
+.brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--accent); color: var(--accent-strong); font: 700 12px/1 "Consolas", monospace; letter-spacing: 0; }
+.eyebrow { color: var(--accent); font: 600 10px/1.2 "Consolas", monospace; letter-spacing: 1.4px; }
+h1 { margin: 3px 0 0; font-size: 17px; line-height: 1.2; font-weight: 650; letter-spacing: 0; }
+.top-status { margin-left: auto; color: var(--muted); font: 12px "Consolas", monospace; display: flex; align-items: center; gap: 8px; }
+.status-dot, .live-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: var(--muted); }
+.status-dot.ready, .live-dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(83,199,179,.12); }
+.workspace { height: calc(100dvh - 68px); display: grid; grid-template-columns: 340px 1fr; }
+.control-panel { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); }
+.section-block { padding: 18px 18px 19px; border-bottom: 1px solid var(--line); }
+.section-heading { display: flex; align-items: baseline; gap: 10px; margin-bottom: 15px; }
+.section-heading span { color: var(--accent); font: 11px "Consolas", monospace; }
+h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .2px; }
+label { display: block; margin: 11px 0 6px; color: var(--muted); font: 11px "Consolas", monospace; }
+input[type=text], input[type=number], select { width: 100%; height: 34px; padding: 0 9px; color: var(--text); background: #111719; border: 1px solid var(--line); border-radius: 3px; outline: none; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(83,199,179,.18); }
+.field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.check-row { display: flex; align-items: center; gap: 8px; color: var(--text); font: 12px "Segoe UI", sans-serif; margin: 11px 0 0; }
+.check-row input { accent-color: var(--accent); }
+.check-row.muted { color: var(--muted); }
+.parameter-group { margin-top: 14px; border-top: 1px solid var(--line); }
+.parameter-group summary { padding: 12px 0 3px; color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; list-style-position: inside; }
+.parameter-group summary::marker { color: var(--accent); }
+.parameter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 9px; }
+.parameter-wide { grid-column: 1 / -1; }
+.parameter-group input { font-family: "Consolas", monospace; }
+.primary-action, .secondary-action { height: 35px; border-radius: 3px; transition: transform .18s ease, background .18s ease, border-color .18s ease; }
+.primary-action { width: 100%; margin-top: 16px; border: 1px solid var(--accent); background: var(--accent); color: #10201d; font-weight: 700; }
+.secondary-action { flex: 1; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); }
+.stress-action { width: 100%; margin-top: 15px; color: var(--accent-strong); }
+button:hover { border-color: var(--accent); }
+button:active { transform: translateY(1px) scale(.99); }
+.action-row { display: flex; gap: 8px; margin-top: 15px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.range-value { display: flex; justify-content: space-between; color: var(--muted); font: 10px "Consolas", monospace; }
+.range-value strong { color: var(--accent-strong); font-size: 13px; }
+.job-state { color: var(--accent-strong); font: 11px "Consolas", monospace; }
+pre { height: 120px; margin: 10px 0 0; padding: 10px; overflow: auto; white-space: pre-wrap; color: #aebbb8; background: #101516; border: 1px solid var(--line); font: 10px/1.5 "Consolas", monospace; }
+.viewport-panel { position: relative; min-width: 0; background: #0b1012; }
+#cesiumContainer { position: absolute; inset: 0; }
+.viewport-header { position: absolute; top: 16px; left: 18px; right: 18px; display: flex; justify-content: space-between; pointer-events: none; color: #d6e2df; font: 11px "Consolas", monospace; }
+.live-label { display: flex; gap: 8px; align-items: center; color: var(--accent-strong); }
+.metrics-strip { position: absolute; left: 18px; right: 18px; bottom: 18px; display: grid; grid-template-columns: repeat(11, minmax(70px, 1fr)); gap: 1px; border: 1px solid rgba(137,158,157,.32); background: rgba(14,20,22,.88); backdrop-filter: blur(10px); }
+.metrics-strip div { min-height: 60px; padding: 10px 12px; border-right: 1px solid rgba(137,158,157,.22); }
+.metrics-strip div:last-child { border-right: 0; }
+.metrics-strip span { display: block; color: var(--muted); font: 10px "Consolas", monospace; }
+.metrics-strip strong { display: block; margin-top: 6px; color: var(--text); font: 17px "Consolas", monospace; }
+.empty-state { position: absolute; left: 50%; top: 50%; width: min(390px, calc(100% - 48px)); transform: translate(-50%, -50%); padding: 26px; border-left: 2px solid var(--accent); background: rgba(15,21,23,.84); pointer-events: none; }
+.empty-index { color: var(--accent); font: 10px "Consolas", monospace; letter-spacing: 1.2px; }
+.empty-state h2 { margin: 12px 0 8px; font-size: 21px; }
+.empty-state p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+@media (max-width: 850px) {
+  body { overflow: auto; }
+  .workspace { height: auto; min-height: calc(100dvh - 68px); grid-template-columns: 1fr; }
+  .control-panel { order: 2; border-right: 0; }
+  .viewport-panel { order: 1; min-height: 62dvh; }
+  .metrics-strip { grid-template-columns: repeat(3, 1fr); }
+  .metrics-strip div:nth-child(n+7) { display: none; }
+}

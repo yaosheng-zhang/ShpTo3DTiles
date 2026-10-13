@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pipeline.api.mapper.ObjQueryMapper">
+
+    <resultMap id="ObjModelMap" type="com.pipeline.api.dto.ObjModelDTO">
+        <result column="filename" property="filename"/>
+        <result column="rel_path" property="relPath"/>
+    </resultMap>
+
+    <!--
+        范围查询 (WKT, EPSG:4544)
+        ST_Intersects: hull 与范围有任何重叠
+        DISTINCT: 多 hull/MultiPolygon 都同一个 filename 时去重
+    -->
+    <select id="findObjsByWktPolygon" parameterType="string" resultMap="ObjModelMap">
+        SELECT DISTINCT filename, rel_path
+        FROM obj_body
+        WHERE ST_Intersects(
+            hull_geom,
+            ST_GeomFromText(#{wkt}, 4544)
+        )
+        ORDER BY filename
+    </select>
+
+    <!--
+        范围查询 (GeoJSON, WGS84 -> EPSG:4544)
+        GeoJSON RFC 7946 默认坐标系是 4326，后端 ST_Transform 到 4544
+    -->
+    <select id="findObjsByGeoJsonPolygon" parameterType="string" resultMap="ObjModelMap">
+        SELECT DISTINCT filename, rel_path
+        FROM obj_body
+        WHERE ST_Intersects(
+            hull_geom,
+            ST_Transform(
+                ST_SetSRID(ST_GeomFromGeoJSON(#{json}), 4326),
+                4544
+            )
+        )
+        ORDER BY filename
+    </select>
+
+    <!--
+        按道路名查询 OBJ
+        name 字段约 60% NULL (来自 MC), 所以同时 fallback 到 src_meta JSONB 的全文
+        ILIKE 大小写不敏感; 前后加 % 做包含匹配
+        JOIN obj_road_leg 拿到所有 leg-level 关联
+    -->
+    <select id="findObjsByRoadName" parameterType="string" resultMap="ObjModelMap">
+        SELECT DISTINCT b.filename, b.rel_path
+        FROM obj_body b
+                 JOIN obj_road_leg l ON l.obj_id = b.obj_id
+                 JOIN road_centerline r ON r.gid = l.road_gid
+        WHERE r.name ILIKE '%' || #{name} || '%'
+           OR (r.src_meta IS NOT NULL AND r.src_meta::text ILIKE '%' || #{name} || '%')
+        ORDER BY b.filename
+    </select>
+
+</mapper>

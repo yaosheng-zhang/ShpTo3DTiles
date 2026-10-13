@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.pipeline.api.mapper.BuildingQueryMapper">
+
+    <resultMap id="FootprintMap" type="com.pipeline.api.dto.BuildingFootprintDTO">
+        <result column="bid"        property="bid"/>
+        <result column="jzgd"       property="jzgd"/>
+        <result column="base_z"     property="baseZ"/>
+        <result column="bld_usage"  property="bldUsage"/>
+        <result column="floors"     property="floors"/>
+        <result column="wkt"        property="wkt"/>
+    </resultMap>
+
+    <!--
+        Range query (EPSG:4544 WKT). Returns footprint as WKT so the Java side
+        can parse with JTS and extrude on demand.
+    -->
+    <select id="findFootprintsByWktPolygon" parameterType="string" resultMap="FootprintMap">
+        SELECT bid, jzgd, base_z, bld_usage, lc AS floors,
+               ST_AsText(footprint) AS wkt
+        FROM building_footprint
+        WHERE ST_Intersects(
+            footprint,
+            ST_GeomFromText(#{wkt}, 4544)
+        )
+        ORDER BY bid
+    </select>
+
+    <!--
+        Range query (WGS84 GeoJSON). Same as above but transforms 4326 -> 4544.
+    -->
+    <select id="findFootprintsByGeoJsonPolygon" parameterType="string" resultMap="FootprintMap">
+        SELECT bid, jzgd, base_z, bld_usage, lc AS floors,
+               ST_AsText(footprint) AS wkt
+        FROM building_footprint
+        WHERE ST_Intersects(
+            footprint,
+            ST_Transform(
+                ST_SetSRID(ST_GeomFromGeoJSON(#{json}), 4326),
+                4544
+            )
+        )
+        ORDER BY bid
+    </select>
+
+</mapper>
