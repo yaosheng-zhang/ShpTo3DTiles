@@ -20,12 +20,16 @@ public final class TilesetWriter {
     private TilesetWriter() {}
     public record LodContent(String uri, double geometricError) {}
     public record Tile(String uri, double[] localBoxCenter, double[] localBoxHalf,
-                       List<LodContent> lods) {
+                       List<LodContent> lods, List<Tile> children) {
         public Tile(String uri, double[] localBoxCenter, double[] localBoxHalf) {
-            this(uri, localBoxCenter, localBoxHalf, List.of());
+            this(uri, localBoxCenter, localBoxHalf, List.of(), List.of());
+        }
+        public Tile(String uri, double[] center, double[] half, List<LodContent> lods) {
+            this(uri, center, half, lods, List.of());
         }
         public Tile {
             lods = lods == null ? List.of() : List.copyOf(lods);
+            children = children == null ? List.of() : List.copyOf(children);
         }
     }
 
@@ -155,7 +159,7 @@ public final class TilesetWriter {
                 List<LodContent> lods = tile.lods();
                 for (int i = 0; i < lods.size(); i++) {
                     LodContent lod = lods.get(i);
-                    current.put("content", Map.of("uri", lod.uri()));
+                    current.put("content", Map.of("uri", relativeTileUri(currentFile, batchDir, lod.uri())));
                     current.put("geometricError", lod.geometricError());
                     current.put("refine", "REPLACE");
                     if (i + 1 < lods.size()) {
@@ -165,6 +169,10 @@ public final class TilesetWriter {
                         current = child;
                     }
                 }
+            }
+            if (!tile.children().isEmpty()) {
+                leaf.put("refine", "REPLACE");
+                leaf.put("children", contentLeaves(tile.children(), currentFile, batchDir));
             }
             leaves.add(leaf);
         }

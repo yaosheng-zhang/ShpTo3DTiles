@@ -1,5 +1,7 @@
 package com.pipeline.api.cli;
 
+import java.util.Map;
+
 import com.pipeline.api.dto.BuildingFootprintDTO;
 import com.pipeline.api.geom.BuildingExtruder;
 import com.pipeline.api.geom.WhiteModelObjWriter;
@@ -182,6 +184,9 @@ public final class ShpTo3dTilesCli {
 
                var14.sort(Comparator.comparing(TilesetWriter.Tile::uri));
                var10.report(true);
+               if (var1.textures && var1.buildingLodChain && !var1.legacyPerBuilding) {
+                  var14 = new ArrayList<>(batchTexturedL1(var6, var14, var1, var9, var4));
+               }
                TilesetWriter.write(
                   var1.outDir,
                   var9.lonDeg,
@@ -459,6 +464,74 @@ public final class ShpTo3dTilesCli {
       return var5;
    }
 
+   /** Merge only the far white level; keep per-building textured descendants. */
+   private static List<TilesetWriter.Tile> batchTexturedL1(
+      List<BuildingRecord> records, List<TilesetWriter.Tile> details,
+      Options options, CoordinateFrame frame, Path output) throws Exception {
+      Map<String, BuildingRecord> byUri = new java.util.HashMap<>();
+      for (BuildingRecord record : records) {
+         byUri.put(String.format(Locale.ROOT, "b3dm/b%012d_%06d_l2.b3dm", record.id, record.ordinal), record);
+      }
+      List<TilesetWriter.Tile> result = new ArrayList<>();
+      partitionTexturedL1(new ArrayList<>(details), byUri, options, frame, output, result);
+      System.out.printf("[L1 batching] buildings=%d batches=%d maxBuildings=%d maxTriangles=20000 maxSpan=512m%n",
+                        details.size(), result.size(), options.tileMaxContents);
+      return result;
+   }
+
+   private static void partitionTexturedL1(
+      List<TilesetWriter.Tile> details, Map<String, BuildingRecord> records,
+      Options options, CoordinateFrame frame, Path output,
+      List<TilesetWriter.Tile> result) throws Exception {
+      if (details.isEmpty()) return;
+      double[] bounds = null;
+      for (TilesetWriter.Tile tile : details) {
+         double[] c = tile.localBoxCenter(), h = tile.localBoxHalf();
+         double[] b = {c[0]-h[0], c[1]-h[1], c[2]-h[2], c[0]+h[0], c[1]+h[1], c[2]+h[2]};
+         bounds = bounds == null ? b : unionBox(bounds, b);
+      }
+      boolean split = details.size() > options.tileMaxContents ||
+                      Math.max(bounds[3]-bounds[0], bounds[4]-bounds[1]) > 512;
+      Mesh mesh = new Mesh();
+      if (!split || details.size() == 1) {
+         // Strict conversion: never publish a parent that silently omits a child.
+         for (TilesetWriter.Tile tile : details) {
+            BuildingRecord record = records.get(tile.uri());
+            if (record == null) throw new IllegalStateException("Missing L1 record: " + tile.uri());
+            List<BuildingExtruder.Segment> segments = BuildingExtruder.extrude(
+               copyForLod(record.dto, LodProfile.L1_SIMPLE), options.toProfile(LodProfile.L1_SIMPLE));
+            if (segments.isEmpty()) throw new IllegalStateException("Empty L1: " + tile.uri());
+            bounds = unionBox(bounds, shiftAndBox(segments, frame));
+            appendSegments(mesh, segments);
+         }
+         split = split || mesh.triangleCount() > 20000 ||
+                 Math.max(bounds[3]-bounds[0], bounds[4]-bounds[1]) > 512;
+      }
+      if (split && details.size() > 1) {
+         final int axis = bounds[3]-bounds[0] >= bounds[4]-bounds[1] ? 0 : 1;
+         details.sort(Comparator.comparingDouble((TilesetWriter.Tile t) -> t.localBoxCenter()[axis])
+                                .thenComparing(TilesetWriter.Tile::uri));
+         int middle = details.size()/2;
+         partitionTexturedL1(new ArrayList<>(details.subList(0, middle)), records, options, frame, output, result);
+         partitionTexturedL1(new ArrayList<>(details.subList(middle, details.size())), records, options, frame, output, result);
+         return;
+      }
+      ObjToGlb.Options glb = new ObjToGlb.Options();
+      glb.inputAxis = ObjToGlb.Axis.Z;
+      glb.outputAxis = ObjToGlb.Axis.Y;
+      glb.generateNormalsIfMissing = true;
+      glb.forceFlat = true;
+      glb.indexVertices = true;
+      glb.doubleSided = false;
+      String name = String.format(Locale.ROOT, "region_%06d_l1.b3dm", result.size());
+      Path target = output.resolve(name), temp = output.resolve(name + ".tmp");
+      Files.write(temp, B3dmWriter.wrap(ObjToGlb.convert(mesh, glb)));
+      moveReplacing(temp, target);
+      String uri = "b3dm/" + name;
+      TilesetWriter.Tile parent = toTile(uri, bounds, List.of(new TilesetWriter.LodContent(uri, 18.0)));
+      result.add(new TilesetWriter.Tile(uri, parent.localBoxCenter(), parent.localBoxHalf(), parent.lods(), details));
+   }
+
    private static List<ShpTo3dTilesCli.BuildingRecord> spatialOrder(List<ShpTo3dTilesCli.BuildingRecord> var0) {
       ArrayList<ShpTo3dTilesCli.PositionedRecord> var1 = new ArrayList<>(var0.size());
       double var2 = Double.POSITIVE_INFINITY;
@@ -686,7 +759,7 @@ public final class ShpTo3dTilesCli {
          // Smaller L2 error postpones full-detail refinement; this is not hysteresis.
          double[] var10 = new double[]{18.0, 3.0, 0.0};
 
-         for (int var11 = 0; var11 < var9.length; var11++) {
+         for (int var11 = (var1.textures && !var1.legacyPerBuilding ? 1 : 0); var11 < var9.length; var11++) {
             LodProfile var12 = var9[var11];
             BuildingFootprintDTO var13 = copyForLod(var0.dto, var12);
             List var14 = BuildingExtruder.extrude(var13, var1.toProfile(var12));
@@ -1249,7 +1322,7 @@ public final class ShpTo3dTilesCli {
       static void printUsage() {
          System.out
             .println(
-               "SHP -> OBJ -> GLB -> b3dm -> 3D Tiles\n\nThe tileset root lon/lat are derived from the source CRS\n(explicit --prj wins, else the SHP companion .prj) and the\ncentroid mean of every footprint, projected to WGS84.\nNo --lon/--lat/--origin arguments are needed.\n\nRequired:\n  --shp <file.shp>          input polygon shapefile (with .prj alongside)\n  --out <directory>         output directory\n\nCoordinate system:\n  --prj <file.prj>          optional explicit .prj (WKT). Use it when\n                            the SHP has no companion .prj, when the\n                            companion one is wrong, or to reuse one\n                            .prj for a batch of shapefiles.\n\nOptional SHP field overrides (defaults shown):\n  --id-attr <name>           default: bid\n  --height-attr <name>       default: jzgd\n  --base-z-attr <name>       default: base_z\n  --floors-attr <name>       default: lc\n  --usage-attr <name>        default: bld_usage\n\nGeneration switches:\n  --texture-atlas-width 384|768|1536\n                             shared LOD atlas width, default: 384\n  --textures true|false       embed facade textures, default: false\n  --building-lod-chain true|false\n                             batch-level L1/L2/L3 chain, default: false\n  --legacy-per-building true|false\n                             use the pre-optimized OBJ pipeline, default: false\n  --keep-intermediate true|false\n                             keep obj/ and glb/ files, default: false\n  --resume true|false          reuse completed .b3dm + .done outputs\n  --parallelism N              conversion workers, default: min(8, CPU)\n  --progress-interval-seconds N\n                             progress log interval, default: 5\n  --lod NONE|L1_SIMPLE|L2_STANDARD|L3_DETAIL\n                             per-building simplification/detail level\n  --tile-max-contents N      max b3dm contents per leaf, default: 64\n  --tile-max-depth N         max spatial tree depth, default: 12\n  --tile-external-depth N    write nested tilesets from this depth, default: 2\n\nParapet knobs (metres unless noted):\n  --parapet-min-lc      N     lc threshold, default: 5\n  --parapet-min-height   m     default: 0.80\n  --parapet-max-height   m     default: 1.40\n  --parapet-per-floor    m     default: 0.04\n  --parapet-thickness    m     ring wall thickness, default: 0.40\n\nRooftop machine-room knobs (single shaft, metres):\n  --shaft-min-lc         N     lc threshold, default: 9\n  --shaft-inset          m     footprint inward offset, default: 1.50\n  --shaft-clearance      m     shaft-to-boundary clearance, default: 2.00\n  --shaft-max-len        m     max long axis, default: 8.00\n  --shaft-max-wid        m     max short axis, default: 6.00\n  --shaft-max-height     m     max rise, default: 6.00\n  --shaft-center-ratio  ratio central band / full span, default: 0.80\n"
+               "SHP -> OBJ -> GLB -> b3dm -> 3D Tiles\n\nThe tileset root lon/lat are derived from the source CRS\n(explicit --prj wins, else the SHP companion .prj) and the\ncentroid mean of every footprint, projected to WGS84.\nNo --lon/--lat/--origin arguments are needed.\n\nRequired:\n  --shp <file.shp>          input polygon shapefile (with .prj alongside)\n  --out <directory>         output directory\n\nCoordinate system:\n  --prj <file.prj>          optional explicit .prj (WKT). Use it when\n                            the SHP has no companion .prj, when the\n                            companion one is wrong, or to reuse one\n                            .prj for a batch of shapefiles.\n\nOptional SHP field overrides (defaults shown):\n  --id-attr <name>           default: bid\n  --height-attr <name>       default: jzgd\n  --base-z-attr <name>       default: base_z\n  --floors-attr <name>       default: lc\n  --usage-attr <name>        default: bld_usage\n\nGeneration switches:\n  --texture-atlas-width 384|768|1536\n                             shared LOD atlas width, default: 384\n  --textures true|false       embed facade textures, default: false\n  --building-lod-chain true|false\n                             regional white L1 + textured L2/L3, default: false\n  --legacy-per-building true|false\n                             use the pre-optimized OBJ pipeline, default: false\n  --keep-intermediate true|false\n                             keep obj/ and glb/ files, default: false\n  --resume true|false          reuse completed .b3dm + .done outputs\n  --parallelism N              conversion workers, default: min(8, CPU)\n  --progress-interval-seconds N\n                             progress log interval, default: 5\n  --lod NONE|L1_SIMPLE|L2_STANDARD|L3_DETAIL\n                             per-building simplification/detail level\n  --tile-max-contents N      batch/spatial capacity, default: 32\n  --tile-max-depth N         max spatial tree depth, default: 12\n  --tile-external-depth N    write nested tilesets from this depth, default: 2\n\nParapet knobs (metres unless noted):\n  --parapet-min-lc      N     lc threshold, default: 5\n  --parapet-min-height   m     default: 0.80\n  --parapet-max-height   m     default: 1.40\n  --parapet-per-floor    m     default: 0.04\n  --parapet-thickness    m     ring wall thickness, default: 0.40\n\nRooftop machine-room knobs (single shaft, metres):\n  --shaft-min-lc         N     lc threshold, default: 9\n  --shaft-inset          m     footprint inward offset, default: 1.50\n  --shaft-clearance      m     shaft-to-boundary clearance, default: 2.00\n  --shaft-max-len        m     max long axis, default: 8.00\n  --shaft-max-wid        m     max short axis, default: 6.00\n  --shaft-max-height     m     max rise, default: 6.00\n  --shaft-center-ratio  ratio central band / full span, default: 0.80\n"
             );
       }
    }

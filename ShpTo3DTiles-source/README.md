@@ -77,11 +77,20 @@ Recommended balance for large building datasets:
   --lod L2_STANDARD --tile-max-contents 32 --parallelism 4
 ```
 
-Use `--building-lod-chain true` for progressive detail. Use
-`--legacy-per-building true` only for comparison or when per-building facade
-textures are required. Texture atlas assignment is not yet supported in the
-shared optimized batch, so `--textures true` currently selects the legacy
-per-building path.
+Use `--building-lod-chain true` for progressive detail. With `--textures true`,
+the default chain merges the distant, untextured L1 buildings into regional
+meshes; each region has per-building textured L2 children with L3 descendants.
+All levels use REPLACE and errors 18/3/0. L1 uses the actual simplified building
+geometry, not a box proxy. This reduces distant-view requests and model objects
+while retaining the existing detailed geometry, materials and compact atlas.
+
+Textured L1 regions are split along their longest horizontal axis, limited by
+`--tile-max-contents` (default 32 buildings), a 512 m horizontal span and
+20,000 triangles. A single oversized building remains intact. Use a fresh
+output directory when comparing results. `--legacy-per-building true` retains
+the previous individual L1/L2/L3 chain for comparison. Without a LOD chain,
+textured output remains per-building; untextured output keeps its existing
+batching path. Existing output directories must be regenerated to benefit.
 
 The texture pipeline recognizes common usage-field variants such as
 `bld_usage`, `bldUsage`, and `bldUseage`. In textured LOD chains, only vertical
