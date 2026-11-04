@@ -31,13 +31,23 @@ h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .2px; }
 label { display: block; margin: 11px 0 6px; color: var(--muted); font: 11px "Consolas", monospace; }
 input[type=text], input[type=number], select { width: 100%; height: 34px; padding: 0 9px; color: var(--text); background: #111719; border: 1px solid var(--line); border-radius: 3px; outline: none; }
 input:focus, select:focus { border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(83,199,179,.18); }
+[hidden] { display: none !important; }
+.path-picker { display: flex; gap: 6px; min-width: 0; }
+.path-picker input { min-width: 0; cursor: pointer; text-overflow: ellipsis; }
+.path-picker button { flex: 0 0 66px; }
+.parameter-grid > div:has(.path-picker) { grid-column: 1 / -1; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .check-row { display: flex; align-items: center; gap: 8px; color: var(--text); font: 12px "Segoe UI", sans-serif; margin: 11px 0 0; }
 .check-row input { accent-color: var(--accent); }
 .check-row.muted { color: var(--muted); }
 .parameter-group { margin-top: 14px; border-top: 1px solid var(--line); }
-.parameter-group summary { padding: 12px 0 3px; color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; list-style-position: inside; }
-.parameter-group summary::marker { color: var(--accent); }
+.parameter-group summary { display: flex; align-items: center; gap: 8px; padding: 12px 0 3px; color: var(--text); font-size: 12px; font-weight: 650; cursor: pointer; list-style: none; user-select: none; }
+.parameter-group summary::-webkit-details-marker { display: none; }
+.parameter-group summary::before { content: "+"; display: inline-grid; width: 15px; height: 15px; place-items: center; border: 1px solid var(--line); color: var(--accent); font: 12px/1 "Consolas", monospace; }
+.parameter-group[open] summary::before { content: "−"; background: rgba(83,199,179,.08); }
+.parameter-group summary:hover { color: var(--accent-strong); }
+.parameter-group-primary { margin-top: 10px; }
+.parameter-stack { display: grid; gap: 0; }
 .parameter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 9px; }
 .parameter-wide { grid-column: 1 / -1; }
 .parameter-group input { font-family: "Consolas", monospace; }
@@ -66,6 +76,15 @@ pre { height: 120px; margin: 10px 0 0; padding: 10px; overflow: auto; white-spac
 .empty-index { color: var(--accent); font: 10px "Consolas", monospace; letter-spacing: 1.2px; }
 .empty-state h2 { margin: 12px 0 8px; font-size: 21px; }
 .empty-state p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.feature-panel { position: absolute; z-index: 5; top: 56px; right: 18px; width: min(390px, calc(100% - 36px)); max-height: min(58vh, 560px); overflow: auto; border: 1px solid rgba(137,158,157,.45); background: rgba(14,20,22,.96); color: var(--text); }
+.feature-panel[hidden] { display: none; }
+.feature-panel-header { position: sticky; top: 0; display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #11191a; }
+.feature-panel-header strong { flex: 1; font-size: 12px; }
+.feature-panel-header button { min-height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: #1b2728; color: var(--text); font-size: 11px; cursor: pointer; }
+.feature-properties { display: grid; grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.6fr); margin: 0; font: 11px/1.5 "Consolas", monospace; }
+.feature-properties dt, .feature-properties dd { min-width: 0; margin: 0; padding: 7px 10px; border-bottom: 1px solid rgba(137,158,157,.16); overflow-wrap: anywhere; white-space: pre-wrap; }
+.feature-properties dt { color: var(--accent-strong); }
+.feature-properties dd { color: #d6e2df; }
 @media (max-width: 850px) {
   body { overflow: auto; }
   .workspace { height: auto; min-height: calc(100dvh - 68px); grid-template-columns: 1fr; }
@@ -73,4 +92,6 @@ pre { height: 120px; margin: 10px 0 0; padding: 10px; overflow: auto; white-spac
   .viewport-panel { order: 1; min-height: 62dvh; }
   .metrics-strip { grid-template-columns: repeat(3, 1fr); }
   .metrics-strip div:nth-child(n+7) { display: none; }
+  .feature-panel { top: 50px; right: 10px; width: min(390px, calc(100% - 20px)); max-height: 45vh; }
 }
+.picker-status { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 4px; overflow-wrap: anywhere; }

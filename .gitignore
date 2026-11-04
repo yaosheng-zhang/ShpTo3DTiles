@@ -14,6 +14,11 @@
 **/__pycache__/
 *.pyc
 *.class
+/ShpTo3DTiles-reconstructed-source/ShpTo3DTiles-optimized/
+/ShpTo3DTiles-reconstructed-source/decompiled-cfr/
+/ShpTo3DTiles-reconstructed-source/webviewer.html
+/ShpTo3DTiles-reconstructed-source/webviewer.css
+/ShpTo3DTiles-reconstructed-source/webviewer.js
 /ShpTo3DTiles-source/.legacy-smoke/
 /ShpTo3DTiles-source/.optimized-single/
 /ShpTo3DTiles-source/.optimized-smoke/
@@ -23,3 +28,5 @@
 # Original local datasets
 /建筑底面/
 /建筑纹理/
+/cesium/index.js
+/cesium/index.cjs

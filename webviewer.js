@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
   let viewer = null;
@@ -14,10 +14,12 @@
   let visibleLodCounts = [0, 0, 0];
   let tileFailureCount = 0;
   let recentTileFailure = "";
+  let sourceTilesetPath = "";
   let serverUnavailable = false;
   let healthCheckPending = false;
   let serverPid = null;
   let tilesetLoadGeneration = 0;
+  let pickedFeatureProperties = null;
 
   const log = (message, replace) => {
     const el = $("logOutput");
@@ -40,9 +42,23 @@
   }
 
   async function getJson(url, options) {
-    const response = await fetch(url, options);
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    let response;
+    let text;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await fetch(url, options);
+      text = await response.text();
+      if (text.trim() || attempt === 1 || options?.method === "POST") break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    if (!text.trim()) throw new Error(`${url}: 服务返回了空响应（HTTP ${response.status}）`);
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (error) {
+      const preview = text.replace(/\s+/g, " ").slice(0, 160);
+      throw new Error(`${url}: 返回内容不是有效 JSON（HTTP ${response.status}）：${preview}`);
+    }
+    if (!response.ok) throw new Error(body.error || `${url}: HTTP ${response.status}`);
     return body;
   }
 
@@ -106,6 +122,19 @@
       // Buildings remain fully viewable on a local ellipsoid without a network.
       baseLayer: false
     });
+    const pickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    pickHandler.setInputAction((movement) => {
+      const picked = viewer.scene.pick(movement.position);
+      const properties = readPickedProperties(picked);
+      if (!properties) {
+        $("featurePanel").hidden = true;
+        pickedFeatureProperties = null;
+        return;
+      }
+      pickedFeatureProperties = properties;
+      renderPickedProperties(properties);
+      $("featurePanel").hidden = false;
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     viewer.scene.debugShowFramesPerSecond = false;
     viewer.scene.preRender.addEventListener(() => visibleLodTiles.clear());
     let last = performance.now();
@@ -119,7 +148,7 @@
         previousVisibleLodTiles = new Set(visibleLodTiles);
         visibleLodCounts = [0, 0, 0];
         for (const uri of visibleLodTiles) {
-          const match = /_l([123])\.b3dm(?:[?#]|$)/i.exec(uri);
+          const match = /_l([123])\.(?:b3dm|glb)(?:[?#]|$)/i.exec(uri);
           if (match) visibleLodCounts[Number(match[1]) - 1] += 1;
         }
       }
@@ -133,9 +162,47 @@
     });
   }
 
+  function readPickedProperties(picked) {
+    if (!picked) return null;
+    const candidates = [picked, picked.primitive];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate.getPropertyIds !== "function") continue;
+      const result = {};
+      for (const id of candidate.getPropertyIds()) {
+        try {
+          result[id] = candidate.getProperty(id);
+        } catch (error) {
+          result[id] = "[读取失败: " + error.message + "]";
+        }
+      }
+      if (Object.keys(result).length) return result;
+    }
+    const entity = picked.id && picked.id.properties;
+    if (entity) {
+      const result = {};
+      for (const id of entity.propertyNames || []) result[id] = entity[id].getValue(Cesium.JulianDate.now());
+      return Object.keys(result).length ? result : null;
+    }
+    return null;
+  }
+
+  function renderPickedProperties(properties) {
+    const list = $("featureProperties");
+    list.replaceChildren();
+    for (const [key, value] of Object.entries(properties)) {
+      const name = document.createElement("dt");
+      const content = document.createElement("dd");
+      name.textContent = key;
+      content.textContent = value == null
+        ? "<null>"
+        : typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+      list.append(name, content);
+    }
+  }
+
   async function inspect(path) {
     const result = await getJson(`/api/inspect?path=${encodeURIComponent(path)}`);
-    setMetric("metricB3dm", result.b3dmFiles);
+    setMetric("metricB3dm", result.glbFiles ?? result.b3dmFiles ?? 0);
     setMetric("metricContent", result.contentNodes);
     setMetric("metricLod", result.lodNodes);
     setMetric("metricBytes", bytes(result.bytes));
@@ -181,26 +248,41 @@
     }
   }
 
-  async function loadTileset() {
+  async function loadTileset(updateSource = true) {
     const raw = $("resultPath").value.trim();
     if (!raw) throw new Error("请填写输出目录或 tileset.json 路径");
-    const tilesetPath = raw.toLowerCase().endsWith("tileset.json") ? raw : `${raw.replace(/[\\/]$/, "")}/tileset.json`;
+    const tilesetPath = raw.toLowerCase().endsWith(".json") ? raw : `${raw.replace(/[\\/]$/, "")}/tileset.json`;
+    if (updateSource) sourceTilesetPath = tilesetPath;
     if (!viewer) throw new Error("Cesium 尚未加载");
     const generation = ++tilesetLoadGeneration;
     const urlPath = tilesetPath.replace(/\\/g, "/");
     const url = `/fs/${encodeURI(urlPath)}?v=${Date.now()}`;
     $("emptyState").style.display = "none";
     $("tilesetLabel").textContent = "正在加载";
-    const sse = Number($("sse").value);
+    const product = await inspect(raw);
+    if (generation !== tilesetLoadGeneration) return;
+    const fullDetail = !$("lodChain").checked;
+    // SSE controls spatial refinement, not building LOD.
+    const sse = fullDetail ? 1 : Number($("sse").value);
+    const gib = 1024 * 1024 * 1024;
+    // A city loaded with the LOD chain still needs to retain LOD3 tiles.
+    // The old 256 MB cache caused Cesium to evict LOD3 and fall back to LOD2.
+    const cacheBytes = fullDetail
+      ? Math.max(2 * gib, Math.min(16 * gib, product.bytes * 2))
+      : Math.max(2 * gib, Math.min(8 * gib, product.bytes * 2));
+    const cacheOverflowBytes = fullDetail ? 8 * gib : 4 * gib;
     const nextTileset = await Cesium.Cesium3DTileset.fromUrl(url, {
       maximumScreenSpaceError: sse,
-      cacheBytes: 256 * 1024 * 1024,
-      maximumCacheOverflowBytes: 128 * 1024 * 1024,
+      // Keep preloaded LOD3 tiles resident when the full city is visible.
+      cacheBytes,
+      maximumCacheOverflowBytes: cacheOverflowBytes,
+      cullRequestsWhileMoving: false,
       dynamicScreenSpaceError: false,
       foveatedScreenSpaceError: false,
       skipLevelOfDetail: false,
-      immediatelyLoadDesiredLevelOfDetail: false,
-      preferLeaves: false,
+      immediatelyLoadDesiredLevelOfDetail: fullDetail,
+      preloadSiblings: fullDetail,
+      preferLeaves: fullDetail,
       preloadFlightDestinations: true
     });
     // An older asynchronous request must never add a second, overlapping model.
@@ -223,7 +305,6 @@
     activeTileset.allTilesLoaded.addEventListener(() => {
       log("当前视图请求及处理已完成：请对照此时闪烁是否停止。", false);
     });
-    $("freezeLodButton").textContent = "冻结当前 LOD（排查闪烁）";
     activeTileset.tileLoad.addEventListener(() => { lodLoads += 1; });
     activeTileset.tileUnload.addEventListener(() => { lodUnloads += 1; });
     activeTileset.tileFailed.addEventListener((error) => {
@@ -232,9 +313,77 @@
     });
     await viewer.zoomTo(activeTileset);
     if (generation !== tilesetLoadGeneration) return;
+    if (fullDetail) void preloadEntireTileset(activeTileset);
     $("tilesetLabel").textContent = tilesetPath.split(/[\\/]/).pop();
-    await inspect(raw);
     log(`已加载: ${tilesetPath}`, false);
+  }
+
+  async function applyGeometricErrorPreview() {
+    if (!$("lodChain").checked) {
+      throw new Error("请先勾选“三级 LOD”，否则当前结果不会按 LOD1/LOD2/LOD3 切换");
+    }
+    const source = sourceTilesetPath || $("resultPath").value.trim();
+    if (!source) throw new Error("请先选择或加载 tileset.json");
+    const values = {};
+    for (const key of ["L1", "L2", "L3"]) {
+      const value = Number($("geometricError" + key).value);
+      if (!Number.isFinite(value) || value < 0) throw new Error(`LOD${key.slice(1)} geometricError 必须是非负数字`);
+      values["l" + key.slice(1)] = value;
+    }
+    const result = await getJson("/api/patch-geometric-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, ...values })
+    });
+    $("resultPath").value = result.path;
+    log(`已修改 ${result.changed} 个 LOD 节点的 geometricError（L1=${values.l1}，L2=${values.l2}，L3=${values.l3}），正在加载预览`, false);
+    await loadTileset(false);
+  }
+
+  async function commitGeometricErrorPreview() {
+    const source = sourceTilesetPath || $("resultPath").value.trim();
+    if (!source) throw new Error("请先加载原始 tileset.json");
+    const result = await getJson("/api/commit-geometric-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source })
+    });
+    sourceTilesetPath = result.path;
+    $("resultPath").value = result.path;
+    log(`预览参数已保存为正式 tileset.json，原文件备份为：${result.backup}`, false);
+    await loadTileset(false);
+  }
+
+  async function preloadEntireTileset(tileset) {
+    const seen = new Set();
+    const retries = new Map();
+    let failures = 0;
+    let exhausted = false;
+    for (let pass = 0; pass < 1024; pass++) {
+      const pending = [];
+      if (tileset.root && typeof tileset.root.traverse === "function") {
+        tileset.root.traverse((tile) => {
+          if (typeof tile.requestContent !== "function" || tile.contentReady) return;
+          if (seen.has(tile) || (retries.get(tile) || 0) >= 3) return;
+          seen.add(tile);
+          pending.push(tile);
+        });
+      }
+      if (!pending.length) { exhausted = true; break; }
+      for (let start = 0; start < pending.length; start += 32) {
+        const batch = pending.slice(start, start + 32);
+        const results = await Promise.allSettled(batch.map((tile) => tile.requestContent()));
+        results.forEach((result, index) => {
+          if (result.status !== "rejected") return;
+          const tile = batch[index];
+          failures += 1;
+          retries.set(tile, (retries.get(tile) || 0) + 1);
+          seen.delete(tile);
+        });
+      }
+    }
+    const failedTiles = Array.from(retries.values()).filter((count) => count >= 3).length;
+    log(`LOD3 空间瓦片预加载${exhausted ? "完成" : "停止"}：请求 ${seen.size} 块，失败请求 ${failures} 次，连续失败瓦片 ${failedTiles} 块。`, false);
   }
 
   async function startConversion() {
@@ -244,12 +393,16 @@
       return value;
     };
     const params = {
-      lod: $("lod").value,
+      lod: $("lodChain").checked ? $("lod").value : "L3_DETAIL",
       tileMaxContents: numeric("tileMaxContents"),
       tileMaxDepth: numeric("tileMaxDepth"),
       tileExternalDepth: numeric("tileExternalDepth"),
       parallelism: numeric("parallelism"),
       progressIntervalSeconds: numeric("progressInterval"),
+      metadataFields: $("metadataFields").value.trim(),
+      whiteTexture: $("whiteTexture").value.trim(),
+      layeredTexture: $("layeredTexture").value.trim(),
+      floorLineThreshold: numeric("floorLineThreshold"),
       parapetMinLc: numeric("parapetMinLc"),
       parapetMinHeight: numeric("parapetMinHeight"),
       parapetMaxHeight: numeric("parapetMaxHeight"),
@@ -276,9 +429,10 @@
       if (params[key] <= 0) throw new Error(`${$(id).previousElementSibling.textContent}必须大于 0`);
     }
     for (const key of ["tileMaxContents", "tileMaxDepth", "tileExternalDepth", "parallelism",
-      "progressIntervalSeconds", "parapetMinLc", "shaftMinLc"]) {
+      "progressIntervalSeconds", "parapetMinLc", "shaftMinLc", "floorLineThreshold"]) {
       if (!Number.isInteger(params[key])) throw new Error("层数、数量、深度和并行度必须是整数");
     }
+    if (params.floorLineThreshold < 0) throw new Error("分层线阈值不能为负数");
     if (params.parapetMinHeight < 0 || params.parapetPerFloor < 0 || params.shaftClearance < 0) {
       throw new Error("高度增量和净距不能为负数");
     }
@@ -371,13 +525,17 @@
     }
   }
 
-  $("freezeLodButton").addEventListener("click", () => {
-    if (!activeTileset) return;
-    activeTileset.debugFreezeFrame = !activeTileset.debugFreezeFrame;
-    $("freezeLodButton").textContent = activeTileset.debugFreezeFrame ? "恢复自动 LOD" : "冻结当前 LOD（排查闪烁）";
-    log(activeTileset.debugFreezeFrame ? "已冻结瓦片选择：观察闪烁是否停止。此模式用于诊断，请勿用它评估移动视角的加载效果。" : "已恢复自动 LOD。", false);
-  });
   $("convertButton").addEventListener("click", () => startConversion().catch((e) => log(e.message, false)));
+  $("closeFeaturePanel").addEventListener("click", () => { $("featurePanel").hidden = true; });
+  $("copyFeatureProperties").addEventListener("click", async () => {
+    if (!pickedFeatureProperties) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(pickedFeatureProperties, null, 2));
+      log("已复制拾取要素属性 JSON", false);
+    } catch (error) {
+      log("复制属性失败: " + error.message, false);
+    }
+  });
   $("stressButton").addEventListener("click", () => startStressGeneration().catch((e) => log(e.message, false)));
   $("stressPattern").addEventListener("change", () => {
     if ($("stressPattern").value === "continuous") {
@@ -397,6 +555,8 @@
   $("inspectButton").addEventListener("click", () => inspect($("resultPath").value.trim()).catch((e) => log(e.message, false)));
   $("loadButton").addEventListener("click", () => loadTileset().catch((e) => log(e.message, false)));
   $("sse").addEventListener("input", (event) => $("sseValue").textContent = event.target.value);
+  $("applyGeometricErrorButton").addEventListener("click", () => applyGeometricErrorPreview().catch((e) => log(e.message, false)));
+  $("commitGeometricErrorButton").addEventListener("click", () => commitGeometricErrorPreview().catch((e) => log(e.message, false)));
   initViewer();
   checkServer().then(() => {
     const path = new URLSearchParams(location.search).get("result");

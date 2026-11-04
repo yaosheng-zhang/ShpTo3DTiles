@@ -1,0 +1,4 @@
+Target: ShpTo3DTiles-optimized/app/shp-to-3dtiles-gui.jar
+Production sources: Vineflower 1.12.0 decompilation plus target-bytecode-guided type repairs.
+Comparison only: decompiled-cfr/ contains CFR 0.152 output.
+No source or tests from ShpTo3DTiles-source were used in the reconstruction.
