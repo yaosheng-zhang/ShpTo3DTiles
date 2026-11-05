@@ -654,8 +654,8 @@ public final class ShpTo3dTilesCli {
 
             for (ShpTo3dTilesCli.BuildingRecord var16 : var0) {
                try {
-                  BuildingFootprintDTO var17 = copyForLod(var16.dto, LodProfile.L0_OVERVIEW);
-                  List var18 = BuildingExtruder.extrude(var17, var13);
+                  ExtrusionResult var17 = extrudeSafely(var16.dto, var16.id, var16.ordinal, LodProfile.L0_OVERVIEW, var13);
+                  List var18 = var17.segments();
                   if (!var18.isEmpty()) {
                      double[] var19 = shiftAndBox(var18, var3);
                      var28 = var28 == null ? var19 : unionBox(var28, var19);
@@ -666,6 +666,7 @@ public final class ShpTo3dTilesCli {
                      }
                   }
                } catch (Exception var23) {
+                  logBuildingFailure(var16.dto, var16.id, var16.ordinal, LodProfile.L0_OVERVIEW, "regional-overview", var23);
                }
             }
 
@@ -696,6 +697,8 @@ public final class ShpTo3dTilesCli {
                double var20 = Math.max(120.0, Math.min(500.0, var24 * 0.15));
                TilesetWriter.Tile var22 = toTile(var44, var28, List.of(new TilesetWriter.LodContent(var44, var20)));
                var5.add(new TilesetWriter.Tile(var44, var22.localBoxCenter(), var22.localBoxHalf(), var22.lods(), var1));
+            } else {
+               var5.addAll(var1);
             }
          }
       }
@@ -740,9 +743,10 @@ public final class ShpTo3dTilesCli {
                   throw new IllegalStateException("Missing L1 record: " + var20.uri());
                }
 
-               List var12 = BuildingExtruder.extrude(copyForLod(var23.dto, LodProfile.L1_SIMPLE), var2.toProfile(LodProfile.L1_SIMPLE));
+               ExtrusionResult var30 = extrudeSafely(var23.dto, var23.id, var23.ordinal, LodProfile.L1_SIMPLE, var2.toProfile(LodProfile.L1_SIMPLE));
+               List var12 = var30.segments();
                if (var12.isEmpty()) {
-                  throw new IllegalStateException("Empty L1: " + var20.uri());
+                  continue;
                }
 
                var6 = unionBox(var6, shiftAndBox(var12, var3));
@@ -758,7 +762,7 @@ public final class ShpTo3dTilesCli {
             int var22 = var0.size() / 2;
             partitionTexturedL1(new ArrayList<>(var0.subList(0, var22)), var1, var2, var3, var4, var5);
             partitionTexturedL1(new ArrayList<>(var0.subList(var22, var0.size())), var1, var2, var3, var4, var5);
-         } else {
+         } else if (var16.triangleCount() != 0 && var6 != null) {
             ObjToGlb.Options var18 = new ObjToGlb.Options();
             var18.inputAxis = ObjToGlb.Axis.Z;
             var18.outputAxis = ObjToGlb.Axis.Y;
@@ -774,6 +778,8 @@ public final class ShpTo3dTilesCli {
             String var13 = "glb/" + var21;
             TilesetWriter.Tile var14 = toTile(var13, var6, List.of(new TilesetWriter.LodContent(var13, 18.0)));
             var5.add(new TilesetWriter.Tile(var13, var14.localBoxCenter(), var14.localBoxHalf(), var14.lods(), var0));
+         } else {
+            var5.addAll(var0);
          }
       }
    }
@@ -966,9 +972,10 @@ public final class ShpTo3dTilesCli {
       Path var7 = null;
 
       try {
-         BuildingFootprintDTO var8 = copyForLod(var0.dto, var1.lod);
          BuildingExtruder.Profile var9 = var1.toProfile(var1.lod);
-         List var10 = BuildingExtruder.extrude(var8, var9);
+         ExtrusionResult var27 = extrudeSafely(var0.dto, var0.id, var0.ordinal, var1.lod, var9);
+         BuildingFootprintDTO var8 = var27.footprint();
+         List var10 = var27.segments();
          if (var10.isEmpty()) {
             return new ShpTo3dTilesCli.ConversionResult(var0.id, null, "empty extrusion");
          }
@@ -1039,8 +1046,9 @@ public final class ShpTo3dTilesCli {
 
          for (int var11 = var1.textures && !var1.legacyPerBuilding ? 1 : 0; var11 < var9.length; var11++) {
             LodProfile var12 = var9[var11];
-            BuildingFootprintDTO var13 = copyForLod(var0.dto, var12);
-            List var14 = BuildingExtruder.extrude(var13, var1.toProfile(var12));
+            ExtrusionResult var27 = extrudeSafely(var0.dto, var0.id, var0.ordinal, var12, var1.toProfile(var12));
+            BuildingFootprintDTO var13 = var27.footprint();
+            List var14 = var27.segments();
             if (!var14.isEmpty()) {
                double[] var15 = shiftAndBox(var14, var2);
                if (var8 == null) {
@@ -1238,6 +1246,40 @@ public final class ShpTo3dTilesCli {
       return var2;
    }
 
+   static ExtrusionResult extrudeSafely(
+      BuildingFootprintDTO source, long buildingId, int ordinal, LodProfile lod, BuildingExtruder.Profile profile
+   ) {
+      try {
+         BuildingFootprintDTO footprint = copyForLod(source, lod);
+         return new ExtrusionResult(footprint, BuildingExtruder.extrude(footprint, profile));
+      } catch (Exception exception) {
+         logBuildingFailure(source, buildingId, ordinal, lod, "building-extrusion", exception);
+         return new ExtrusionResult(null, List.of());
+      }
+   }
+
+   private static void logBuildingFailure(
+      BuildingFootprintDTO source, long buildingId, int ordinal, LodProfile lod, String stage, Exception exception
+   ) {
+      String reason = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+      GeometryDiagnostics.log(
+         "ERROR stage=" + stage
+            + " buildingId=" + buildingId
+            + " shpOrdinal=" + (ordinal + 1)
+            + " lod=" + lod.name()
+            + " " + source.getDiagnosticContext()
+            + " reason=" + reason
+      );
+      System.err.printf(
+         Locale.ROOT,
+         "[ShpTo3dTilesCli] skipping building id=%d shpOrdinal=%d lod=%s: %s%n",
+         buildingId,
+         ordinal + 1,
+         lod,
+         reason
+      );
+   }
+
    private static String featureDiagnosticContext(SimpleFeature feature, int sourceRow, String idField, Object idValue) {
       StringBuilder context = new StringBuilder(256)
          .append("shpRow=").append(sourceRow)
@@ -1326,8 +1368,9 @@ public final class ShpTo3dTilesCli {
             ArrayList<Map<String, Object>> var25 = new ArrayList<>();
 
             for (ShpTo3dTilesCli.BuildingRecord var27 : var15) {
-               BuildingFootprintDTO var28 = copyForLod(var27.dto, var20);
-               List<BuildingExtruder.Segment> var29 = BuildingExtruder.extrude(var28, var1.toProfile(var20));
+               ExtrusionResult var47 = extrudeSafely(var27.dto, var27.id, var27.ordinal, var20, var1.toProfile(var20));
+               BuildingFootprintDTO var28 = var47.footprint();
+               List<BuildingExtruder.Segment> var29 = var47.segments();
                if (!var29.isEmpty()) {
                   int var30 = var25.size();
                   var25.add(new LinkedHashMap<>(var27.dto.getProperties()));
@@ -1815,6 +1858,9 @@ public final class ShpTo3dTilesCli {
    }
 
    private record BuildingRecord(long id, int ordinal, BuildingFootprintDTO dto) {
+   }
+
+   record ExtrusionResult(BuildingFootprintDTO footprint, List<BuildingExtruder.Segment> segments) {
    }
 
    private record ConversionResult(long id, TilesetWriter.Tile tile, String error) {
